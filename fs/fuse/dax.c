@@ -428,6 +428,14 @@ static void fuse_fill_iomap(struct inode *inode, loff_t pos, loff_t length,
 	}
 }
 
+static bool fuse_dax_range_exceeds_size(struct inode *inode, loff_t pos,
+					loff_t length)
+{
+	loff_t size = i_size_read(inode);
+
+	return pos >= size || length > size - pos;
+}
+
 static int fuse_setup_new_dax_mapping(struct inode *inode, loff_t pos,
 				      loff_t length, unsigned int flags,
 				      struct iomap *iomap)
@@ -566,8 +574,10 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_dax_mapping *dmap;
 	bool writable = flags & IOMAP_WRITE;
+	bool fault = flags & IOMAP_FAULT;
 	unsigned long start_idx = pos >> FUSE_DAX_SHIFT;
 	struct interval_tree_node *node;
+	int err;
 
 	/* We don't support FIEMAP */
 	if (WARN_ON(flags & IOMAP_REPORT))
@@ -577,6 +587,19 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 	iomap->flags = 0;
 	iomap->bdev = NULL;
 	iomap->dax_dev = fc->dax->dev;
+
+	/*
+	 * DAX uses the local inode size when deciding whether a range maps to
+	 * memory or to a hole. With virtio-fs shared by multiple FUSE clients,
+	 * this inode may not yet know that another client extended the file.
+	 * Refresh once before a read or fault that reaches past local EOF.
+	 */
+	if ((!writable || fault) &&
+	    fuse_dax_range_exceeds_size(inode, pos, length)) {
+		err = fuse_update_attributes(inode, NULL, STATX_SIZE);
+		if (err)
+			return err;
+	}
 
 	/*
 	 * Both read/write and mmap path can race here. So we need something
