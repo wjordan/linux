@@ -193,15 +193,6 @@ static int fuse_setup_one_mapping(struct inode *inode, unsigned long start_idx,
 
 	WARN_ON(fcd->nr_free_ranges < 0);
 
-	/* DAX-WAL diag: small-file (.shm etc) setup/upgrade trace. */
-	if (i_size_read(inode) > 0 && i_size_read(inode) <= 65536) {
-		pr_info("fuse-dax-diag: SETUP nodeid=%llu i_ino=%lu i_size=%lld foffset=%llu moffset=%llu writable=%d upgrade=%d icount=%d\n",
-			fi->nodeid, inode->i_ino, i_size_read(inode),
-			(u64)offset, (u64)dmap->window_offset,
-			writable ? 1 : 0, upgrade ? 1 : 0,
-			atomic_read(&inode->i_count));
-	}
-
 	/* Ask fuse daemon to setup mapping */
 	memset(&inarg, 0, sizeof(inarg));
 	inarg.foffset = offset;
@@ -327,14 +318,6 @@ static void inode_reclaim_dmap_range(struct fuse_conn_dax *fcd,
 	unsigned long start_idx = start >> FUSE_DAX_SHIFT;
 	unsigned long end_idx = end >> FUSE_DAX_SHIFT;
 	struct interval_tree_node *node;
-
-	/* DAX-WAL diag: small-file inode-range reclaim trace. */
-	if (i_size_read(inode) > 0 && i_size_read(inode) <= 65536) {
-		pr_info("fuse-dax-diag: INODE_RECLAIM_RANGE nodeid=%llu i_ino=%lu i_size=%lld start_idx=0x%lx end_idx=0x%lx nr=%lu icount=%d\n",
-			fi->nodeid, inode->i_ino, i_size_read(inode),
-			start_idx, end_idx, fi->dax->nr,
-			atomic_read(&inode->i_count));
-	}
 
 	while (1) {
 		node = interval_tree_iter_first(&fi->dax->tree, start_idx,
@@ -629,16 +612,7 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 	down_read(&fi->dax->sem);
 	node = interval_tree_iter_first(&fi->dax->tree, start_idx, start_idx);
 	if (node) {
-		/* DAX-WAL diag: cached-dmap hit for small file. Throttled. */
 		dmap = node_to_dmap(node);
-		if (i_size_read(inode) > 0 && i_size_read(inode) <= 65536) {
-			static unsigned int hit_counter;
-			if ((hit_counter++ % 100) == 0)
-				pr_info("fuse-dax-diag: HIT nodeid=%llu i_size=%lld pos=0x%llx writable_req=%d dmap_writable=%d nr=%lu hit#%u\n",
-					fi->nodeid, i_size_read(inode), (u64)pos,
-					writable ? 1 : 0, dmap->writable ? 1 : 0,
-					fi->dax->nr, hit_counter);
-		}
 		if (writable && !dmap->writable) {
 			/* Upgrade read-only mapping to read-write. This will
 			 * require exclusive fi->dax->sem lock as we don't want
@@ -664,13 +638,6 @@ static int fuse_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 		up_read(&fi->dax->sem);
 		pr_debug("%s: no mapping at offset 0x%llx length 0x%llx\n",
 				__func__, pos, length);
-		/* DAX-WAL diag: small-file empty-tree trace. */
-		if (i_size_read(inode) > 0 && i_size_read(inode) <= 65536) {
-			pr_info("fuse-dax-diag: NOMAP nodeid=%llu i_size=%lld pos=0x%llx len=0x%llx flags=0x%x nr=%lu\n",
-				fi->nodeid, i_size_read(inode),
-				(u64)pos, (u64)length, flags,
-				fi->dax->nr);
-		}
 		if (pos >= i_size_read(inode))
 			goto iomap_hole;
 
@@ -914,13 +881,6 @@ static int reclaim_one_dmap_locked(struct inode *inode,
 {
 	int ret;
 	struct fuse_inode *fi = get_fuse_inode(inode);
-
-	/* DAX-WAL diag: small-file reclaim trace. */
-	if (i_size_read(inode) > 0 && i_size_read(inode) <= 65536) {
-		pr_info("fuse-dax-diag: RECLAIM nodeid=%llu i_size=%lld start_idx=0x%lx moffset=0x%llx refcnt=%d\n",
-			fi->nodeid, i_size_read(inode), dmap->itn.start,
-			dmap->window_offset, refcount_read(&dmap->refcnt));
-	}
 
 	/*
 	 * igrab() was done to make sure inode won't go under us, and this
@@ -1416,8 +1376,3 @@ void fuse_dax_cancel_work(struct fuse_conn *fc)
 
 }
 EXPORT_SYMBOL_GPL(fuse_dax_cancel_work);
-
-bool fuse_dax_inode_has_mappings(struct fuse_inode *fi)
-{
-	return fi && fi->dax && fi->dax->nr > 0;
-}
