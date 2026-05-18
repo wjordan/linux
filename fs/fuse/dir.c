@@ -313,6 +313,30 @@ static void fuse_dentry_release(struct dentry *dentry)
 
 static int fuse_dentry_delete(const struct dentry *dentry)
 {
+	/*
+	 * With virtio-fs DAX, dropping a dentry leads to fuse_evict_inode
+	 * -> fuse_dax_inode_cleanup -> inode_reclaim_dmap_range, which
+	 * wipes fi->dax->tree. The next userspace access to an active
+	 * MAP_SHARED mmap must page-fault into fuse_iomap_begin with an
+	 * empty tree, allocate a new DAX-window slot, and re-issue
+	 * FUSE_SETUPMAPPING. This invalidates the userspace PTE between
+	 * accesses, which breaks SQLite's WAL-index consistency check
+	 * (walTryBeginRead).
+	 *
+	 * If the inode is DAX-mapped and still has live dmaps, keep the
+	 * dentry cached even past its FUSE-supplied entry_timeout. The
+	 * matching attribute refresh path (auto_inval_data) still
+	 * propagates content changes via mtime, so cross-FUSE-client
+	 * coherency is preserved for actual data while DAX-mapped state
+	 * is no longer destroyed by dcache pressure alone.
+	 */
+	if (IS_ENABLED(CONFIG_FUSE_DAX)) {
+		struct inode *inode = d_inode_rcu(dentry);
+
+		if (inode && IS_DAX(inode) &&
+		    fuse_dax_inode_has_mappings(get_fuse_inode(inode)))
+			return 0;
+	}
 	return time_before64(fuse_dentry_time(dentry), get_jiffies_64());
 }
 

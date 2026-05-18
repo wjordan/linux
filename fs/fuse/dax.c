@@ -1375,3 +1375,8 @@ void fuse_dax_cancel_work(struct fuse_conn *fc)
 
 }
 EXPORT_SYMBOL_GPL(fuse_dax_cancel_work);
+
+bool fuse_dax_inode_has_mappings(struct fuse_inode *fi)
+{
+	return fi && fi->dax && fi->dax->nr > 0;
+}
