@@ -770,6 +770,9 @@ struct fuse_conn {
 	/** Are BSD file locking primitives not implemented by fs? */
 	unsigned no_flock:1;
 
+	/** Directory flocks must arbitrate against the shared backing inode. */
+	unsigned shared_dir_flock:1;
+
 	/** Is fallocate not implemented by fs? */
 	unsigned no_fallocate:1;
 
@@ -1128,6 +1131,7 @@ void fuse_sync_release(struct fuse_inode *fi, struct fuse_file *ff,
  * Send RELEASE or RELEASEDIR request
  */
 void fuse_release_common(struct file *file, bool isdir);
+int fuse_file_flock(struct file *file, int cmd, struct file_lock *fl);
 
 /**
  * Send FSYNC or FSYNCDIR request

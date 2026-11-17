@@ -7,6 +7,7 @@
 */
 
 #include "fuse_i.h"
+#include <linux/filelock.h>
 
 #include <linux/pagemap.h>
 #include <linux/file.h>
@@ -2257,10 +2258,23 @@ static const struct inode_operations fuse_dir_inode_operations = {
 	.fileattr_set	= fuse_fileattr_set,
 };
 
+static int fuse_dir_flock(struct file *file, int cmd, struct file_lock *fl)
+{
+	struct fuse_conn *fc = get_fuse_conn(file_inode(file));
+
+	if (!fc->shared_dir_flock)
+		return locks_lock_file_wait(file, fl);
+	/* A guest-local lock would let other clients claim the same directory. */
+	if (fc->no_flock || fc->no_opendir)
+		return -EOPNOTSUPP;
+	return fuse_file_flock(file, cmd, fl);
+}
+
 static const struct file_operations fuse_dir_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
 	.iterate_shared	= fuse_readdir,
+	.flock		= fuse_dir_flock,
 	.open		= fuse_dir_open,
 	.release	= fuse_dir_release,
 	.fsync		= fuse_dir_fsync,

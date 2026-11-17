@@ -2519,7 +2519,7 @@ static int fuse_file_lock(struct file *file, int cmd, struct file_lock *fl)
 	return err;
 }
 
-static int fuse_file_flock(struct file *file, int cmd, struct file_lock *fl)
+int fuse_file_flock(struct file *file, int cmd, struct file_lock *fl)
 {
 	struct inode *inode = file_inode(file);
 	struct fuse_conn *fc = get_fuse_conn(inode);
